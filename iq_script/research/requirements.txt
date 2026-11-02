@@ -1,0 +1,4 @@
+# Research only (not needed by the scripts or the extension): candle analysis and model training.
+numpy>=2.0
+pandas>=2.2
+scikit-learn>=1.5

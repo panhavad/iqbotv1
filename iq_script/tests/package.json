@@ -1,0 +1,8 @@
+{
+  "name": "iq-script-tests",
+  "private": true,
+  "description": "Test-only dependency: runs the QCS emulator on fengari (Lua 5.3 VM in JavaScript).",
+  "dependencies": {
+    "fengari": "0.1.4"
+  }
+}

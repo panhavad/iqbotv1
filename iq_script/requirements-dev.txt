@@ -1,0 +1,3 @@
+# Test-only: the QCS emulator runs on a real Lua 5.3 VM through lupa.
+# The importable scripts themselves need nothing - they run inside the IQ Option traderoom.
+lupa>=2.2
