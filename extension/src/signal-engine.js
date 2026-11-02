@@ -1,5 +1,5 @@
 /*
- * Next Minute signal engine: a JavaScript port of iq_script/src/core.lua.
+ * Next Minute signal engine: a JavaScript port of src/core.lua.
  *
  * It reproduces the QCS semantics of tests/qcs_emulator.lua exactly (nil versus NaN,
  * indicator warm-up, summation order), so for the same closed candles it gives the same

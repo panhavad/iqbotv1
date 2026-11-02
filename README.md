@@ -1,14 +1,78 @@
-# IQ Option chart script: next 1-minute HIGHER / LOWER
+# Next Minute HIGHER / LOWER for IQ Option
 
-Two Quadcode Script (QCS) indicators for the IQ Option traderoom, made for **1-minute candles**
-(any asset):
+A chart script that draws a **CALL / PUT arrow on the next 1-minute candle** in the IQ Option
+traderoom, and an optional **Chrome extension that trades those arrows for you**, learns the best
+settings for each asset and shows how they really perform.
 
-| File | What it shows |
+![The traderoom with the chart script's arrows (left) and the auto-trader's panel (right)](docs/images/traderoom.png)
+
+> **Read this first:** no logic here reaches the 90% win rate it was asked for. On the OTC assets
+> the arrows win about 50%, below the ~53% needed to break even, and the extension says so on
+> screen. It starts on the **practice** account. See [90% is not possible](#read-this-first-90-is-not-possible).
+
+## Highlights
+
+**On the chart:** two Quadcode Script (QCS) indicators for 1-minute candles, any asset
+([NextMinuteSignal.lua](NextMinuteSignal.lua), [NextMinuteScoreboard.lua](NextMinuteScoreboard.lua))
+
+- **Arrows that never repaint:** each arrow is decided from closed candles only and appears the
+  moment its candle opens, so it never moves or disappears.
+- **Win / loss marks** under every arrow, and an optional **scoreboard** with the real win rate on
+  your chart, its 95% band and the break-even line.
+- **Two signal methods:** breakout momentum (default) or a 15-strategy vote, every rule adjustable.
+- **Settings learned for each asset:** with the extension, each asset is drawn with its own learned
+  settings.
+
+**Auto-trading** ([extension/](extension/README.md))
+
+- **Buys within about 0.1 s of the candle opening**, on Binary, Blitz and Digital options (real
+  Bitcoin included), using IQ Option's own closing tick instead of waiting for the closed candle.
+- **Follows the traderoom as you click:** asset, option type and candle size, with names and
+  balances as the traderoom shows them.
+- **Buy both, CALL only or PUT only**, with the win rate of the CALL and the PUT arrows shown apart.
+- **Learns the best logic for each asset:** 264 versions of the signal on up to 60,000 candles,
+  judged on newer candles it never learned from and re-checked with a realistic entry. It learns
+  every open asset in turn, then writes the results into your chart script.
+- **Safe by default:** practice account first, a tick for real money, stop rules (trades, losses in a
+  row, session loss), one trading tab, optional "only trade where it has an edge", and a one-click
+  **Exit**. It also presses the traderoom's **+ NEW OPTION** between deals.
+
+**Honest numbers** ([research/](research/README.md)): trained and tested on about 600,000 real IQ
+Option candles; every result, good or bad, is published.
+
+<table>
+<tr>
+<td width="38%" valign="top"><img src="docs/images/panel.png" alt="The extension's panel: win rate of the logic used here, CALL and PUT apart, the Buy choice and the learned logic"></td>
+<td valign="top"><img src="docs/images/chart.png" alt="The chart script: PUT and CALL arrows with their win and loss marks"><br><br><img src="docs/images/learning.png" alt="Learning an asset: downloading 60,000 candles"></td>
+</tr>
+<tr>
+<td valign="top"><sub>The panel: the win rate here (CALL and PUT apart), Buy both / CALL only / PUT only, auto-trade, and the logic learned for this asset.</sub></td>
+<td valign="top"><sub>Top: the chart script's arrows with their marks (× lost, dot won). Bottom: learning an asset.</sub></td>
+</tr>
+</table>
+
+<sub>Screenshots: EUR/USD Blitz, 1-minute candles, practice account, 2 Nov 2026 (balances hidden).</sub>
+
+## What's in this repository
+
+| Path | What it is |
 |---|---|
-| [NextMinuteSignal.lua](NextMinuteSignal.lua) | A green **CALL** arrow (buy HIGHER) or red **PUT** arrow (buy LOWER) on the candle to trade, plus a win / loss mark for every arrow. Also sends the platform "advice" (buy / sell / neutral). |
+| [NextMinuteSignal.lua](NextMinuteSignal.lua) | The chart script: a green **CALL** arrow (buy HIGHER) or red **PUT** arrow (buy LOWER) on the candle to trade, plus a win / loss mark for every arrow. Also sends the platform "advice" (buy / sell / neutral). |
 | [NextMinuteScoreboard.lua](NextMinuteScoreboard.lua) | Optional panel under the chart: the **real win rate** of those arrows on your chart, its 95% confidence band and the break-even line. |
 | [extension/](extension/README.md) | Optional Chrome extension that trades the same arrows automatically on the asset you select (practice account by default). Read its README first. |
 | [research/](research/README.md) | How the signal was trained and tested on about 600,000 real IQ Option candles, with every result. |
+| [src/](src/) and [build.py](build.py) | The scripts' source: `build.py` builds both `.lua` files (and the extension's copy) from `src/`. |
+| [tests/](tests/) | Offline test suite: a QCS emulator on a real Lua 5.3 VM, reference indicators, and checks that the extension decides exactly like the chart script. |
+| [docs/images/](docs/images/) | The screenshots above. |
+
+## Quick start
+
+1. **Chart script:** on a 1-minute candle chart, open **Indicators > Scripts**, import
+   `NextMinuteSignal.lua` and add it to the chart ([details](#install-about-1-minute)).
+2. **Auto-trading (optional):** in Chrome open `chrome://extensions`, switch on **Developer mode**,
+   click **Load unpacked** and choose the `extension` folder, then open the traderoom. The panel
+   appears over the chart, on the practice account ([extension/README.md](extension/README.md)).
+3. **Developers:** build and test commands are in [For developers](#for-developers).
 
 ## Read this first: 90% is not possible
 
@@ -164,7 +228,7 @@ detail that differs from the documentation.
 ## For developers
 
 ```powershell
-python -m venv .venv                                            # once, inside iq_script
+python -m venv .venv                                            # once, in the repository root
 .venv\Scripts\python.exe -m pip install -r requirements-dev.txt # lupa: a real Lua 5.3 VM for the emulator
 cd tests; npm install; cd ..                                    # optional: fengari for the cross-engine test
 .venv\Scripts\python.exe build.py                               # rebuild both scripts from src/

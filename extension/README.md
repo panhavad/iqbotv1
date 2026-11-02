@@ -42,7 +42,9 @@ learning and the extension's connection, and removes the panel. The toolbar icon
 also after a page reload; click it to start the extension again (auto-trading starts off).
 
 After changing the files, click the reload icon of the extension in `chrome://extensions`, then
-reload the traderoom tab.
+reload the traderoom tab. After moving the folder, choose **Load unpacked** again with its new place.
+Don't **Remove** the extension first: removing deletes its saved data. The extension keeps the same
+ID wherever its folder is (fixed `key` in `manifest.json`), so its settings and learned logic stay.
 
 ## What it trades: your traderoom selection
 
@@ -265,7 +267,7 @@ node --test extension/tests                                      # unit tests: c
 .venv\Scripts\python.exe -m unittest tests.test_extension_engine # JS engine = chart script, candle by candle
 ```
 
-Run them from the `iq_script` folder. [tests/fixtures/eurusd-otc-1m.json](tests/fixtures/eurusd-otc-1m.json)
+Run them from the repository root. [tests/fixtures/eurusd-otc-1m.json](tests/fixtures/eurusd-otc-1m.json)
 holds the 1,000 real candles used by the tests.
 
 | File | Purpose |
@@ -282,12 +284,22 @@ holds the 1,000 real candles used by the tests.
 | [src/new-option.js](src/new-option.js) | Finds and presses the traderoom's **+ NEW OPTION** button between deals. |
 | [src/page-hooks.js](src/page-hooks.js) | Runs in the page: reads a pixel column of the traderoom canvas on request, and passes on the traderoom's selection. |
 | [src/panel.js](src/panel.js) | The on-page panel (Shadow DOM). |
-| [tools/start-test-browser.ps1](tools/start-test-browser.ps1) | Opens a separate test Chrome that stays logged in (see below). |
+| [tools/start-test-browser.ps1](tools/start-test-browser.ps1) | Opens a separate test Chrome that stays logged in, with this extension loaded (see below). |
+| [tools/test-browser.js](tools/test-browser.js) | The launcher behind it: starts that Chrome and loads the extension over a DevTools pipe. |
 
 ### Test browser that stays logged in
 
 `tools/start-test-browser.ps1` opens Chrome with its own profile in `%LOCALAPPDATA%\iqbot\chrome-profile`
 and a DevTools port on `127.0.0.1:9555`, so test scripts (for example Playwright `connectOverCDP`)
-can drive the traderoom. Log in once and load the extension once in that window: both are kept in
-that profile, so later test runs need no new login (the IQ Option session lasts about 30 days). It
-never touches your everyday Chrome profile.
+can drive the traderoom. Log in once in that window: the login is kept in that profile, so later
+test runs need no new login (the IQ Option session lasts about 30 days). It never touches your
+everyday Chrome profile.
+
+It also loads this `extension` folder at every start (`-Headless` runs it without a window). Chrome
+137 and later ignore `--load-extension`, so [tools/test-browser.js](tools/test-browser.js) loads it
+over a DevTools pipe (`Extensions.loadUnpacked`); Chrome keeps such an extension for that session
+only, which is why it is loaded again each time, always from where the repository is now. The fixed
+`key` in [manifest.json](manifest.json) gives the extension the same ID everywhere
+(`ijjacjebpolkbjnhibdnimfhpcnnipmg`), so its settings and learned logic stay with it. The launcher
+needs Node.js and runs in the background until that Chrome is closed (log:
+`%LOCALAPPDATA%\iqbot\test-browser.log`).

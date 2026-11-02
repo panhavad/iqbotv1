@@ -124,7 +124,7 @@ flip on the next ones.
 ## Reproduce
 
 ```powershell
-cd iq_script
+# from the repository root
 .venv\Scripts\python.exe -m pip install -r research\requirements.txt
 powershell -ExecutionPolicy Bypass -File extension\tools\start-test-browser.ps1   # logged-in test browser
 node research\fetch_history.js 76 EURUSD-OTC 60           # <activeId> <name> <days> [candleSeconds]
