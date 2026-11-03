@@ -28,8 +28,9 @@ function randomCandles(n, seed) {
 
 test('the learner gives the same arrows as the signal engine, for every adjusted version', () => {
   const all = versions();
-  assert.equal(all.length, 264);
-  const picks = all.filter((_, k) => k % 7 === 0).concat([CURRENT]);
+  assert.equal(all.length, 432);
+  assert.ok(all.some((r) => r.brkCandles === 1 && r.brkZone === 50), 'the 1-candle, upper / lower half version is tried');
+  const picks = all.filter((_, k) => k % 7 === 0).concat([CURRENT, { method: 'breakout', brkCandles: 1, brkZone: 50, brkBody: 0, reverse: true }]);
   for (const rules of picks) {
     for (const candles of [REAL, randomCandles(600, 7)]) {
       const engine = createEngine(rules);
@@ -48,8 +49,10 @@ test('counts wins on the next candle only, without ties or gaps', () => {
   ];
   const y = outcomes(candles, 60);
   assert.deepEqual(Array.from(y).map((v) => (Number.isNaN(v) ? 'gap' : v)), [1, 0, 'gap', 'gap']);
-  assert.deepEqual(score(Int8Array.from([1, 1, 1, 1]), y, 0, 4), { w: 1, n: 1, cw: 1, cn: 1 });
-  assert.deepEqual(score(Int8Array.from([-1, 0, 0, 0]), y, 0, 4), { w: 0, n: 1, cw: 0, cn: 0 });
+  assert.deepEqual(score(Int8Array.from([1, 1, 1, 1]), y, 0, 4), { w: 1, n: 1, cw: 1, cn: 1, f: 2, m: 2 });
+  assert.deepEqual(score(Int8Array.from([-1, 0, 0, 0]), y, 0, 4), { w: 0, n: 1, cw: 0, cn: 0, f: 1, m: 2 });
+  assert.equal(stats(score(Int8Array.from([1, 1, 1, 1]), y, 0, 4)).coverage, 1, 'the tie counts as an arrow given');
+  assert.equal(stats(score(Int8Array.from([0, 1, 0, 0]), y, 0, 4)).coverage, 0.5);
 });
 
 test('counts the CALL and the PUT arrows apart, everywhere the logic is measured', async () => {
@@ -104,6 +107,29 @@ test('describes rules in words', () => {
   assert.equal(describe(CURRENT), 'breakout 5 candles, close at the high / low');
   assert.equal(describe({ method: 'breakout', brkCandles: 8, brkZone: 10, brkBody: 30, reverse: true }),
     'breakout 8 candles, close within 10%, body at least 30%, reversed (fade)');
+  assert.equal(describe({ method: 'breakout', brkCandles: 1, brkZone: 50, brkBody: 0, reverse: true }),
+    'breakout 1 candle, close in the upper / lower half, reversed (fade)');
+});
+
+test('chooses the logic once for each frequency: more arrows, among versions that give them that often', async () => {
+  const { FREQUENCIES } = require('../src/learner.js');
+  const r = await learn(REAL, { size: 60 });
+  assert.deepEqual(Object.keys(r.levels), FREQUENCIES.map(String));
+  assert.deepEqual(r.rules, r.levels['0'].rules, 'the top level is the best win rate (no minimum)');
+  let previous = -1;
+  for (const f of FREQUENCIES) {
+    const lv = r.levels[String(f)];
+    assert.ok(lv, 'a logic for ' + f);
+    assert.ok(lv.learn.coverage >= f, f + ': ' + lv.learn.coverage);
+    assert.ok(lv.choose.coverage >= 0.8 * f, f + ': ' + lv.choose.coverage);
+    assert.ok(lv.check.coverage > previous - 0.05, 'more frequent: ' + previous + ' -> ' + lv.check.coverage);
+    previous = lv.check.coverage;
+    assert.equal(lv.check.call.n + lv.check.put.n, lv.check.n);
+  }
+  assert.ok(r.levels['0.9'].check.coverage > 0.85, 'almost every candle: ' + r.levels['0.9'].check.coverage);
+  // A frequency that no version reaches has no logic.
+  const rare = await learn(REAL, { size: 60, frequencies: [0, 1.01] });
+  assert.equal(rare.levels['1.01'], null);
 });
 
 // ---- learning queue and its use by the trader ------------------------------------------------
@@ -195,19 +221,21 @@ test('measures the arrows again with the price 5 s after the open', () => {
   assert.deepEqual(lateScore(candles, Int8Array.from([-1, 0, 0, 0]), 0, 4, new Map([[60, 3.1]]), 60), { w: 1, n: 1, cw: 0, cn: 0, total: 1, missing: 0 });
 });
 
-test('a selected asset learned before CALL and PUT arrows were counted apart is learned again', async () => {
+test('a selected asset learned before the logic was chosen per frequency (and CALL / PUT split) is learned again', async () => {
   const { client, trader, queue } = await learningSetup(trendCandles(5000, 1), { learnAll: false });
   assert.equal(await queue.step(), true);
   assert.ok(trader.edge.call && trader.edge.put);
   assert.equal(await queue.step(), false, 'fresh');
   const old = JSON.parse(JSON.stringify(trader.learned['76/60'])); // as saved by version 1.3.0
+  delete old.levels;
   delete old.check.call;
   delete old.check.put;
   trader.setLearned('76/60', old);
   assert.deepEqual([trader.edge.call, trader.edge.put], [null, null]);
+  assert.equal(trader.rules().brkCandles, old.rules.brkCandles, 'its one logic is used meanwhile');
   client.time += 5;
   assert.equal(await queue.step(), true, 'learned again');
-  assert.ok(trader.learned['76/60'].check.call);
+  assert.ok(trader.learned['76/60'].check.call && trader.learned['76/60'].levels);
   assert.equal(trader.edge.call.n + trader.edge.put.n, trader.edge.n);
 });
 

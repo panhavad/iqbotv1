@@ -1,15 +1,20 @@
 /*
  * Learns the best signal logic for one asset from its candle history.
  *
- * It starts from the current logic (the 5-candle breakout), then adjusts it: lookback, how close
- * to the high / low the close must be, minimum candle body, and follow or reverse (264 versions),
- * counting for each version how many arrows it gave and how many won. It stops early when a
- * version reaches the target win rate (90% by default) on candles it was not adjusted on.
+ * It starts from the current logic (the 5-candle breakout), then adjusts it: lookback (1 to 30
+ * candles), how close to the high / low the close must be (up to "the upper / lower half"), minimum
+ * candle body, and follow or reverse (432 versions), counting for each version how many arrows it
+ * gave, how many won, and on what share of the candles it gave one. A version that reaches the
+ * target win rate (90% by default) also on candles it was not adjusted on is chosen at once.
  *
  * Honest by construction: the candles are split by time. Every version is measured on the oldest
  * 60% (learn); the 10 best are compared on the next 20% (choose); the winner is measured once on
  * the newest 20% (check), which no step has used. Only the check result tells whether the logic
- * works: the trader uses a learned logic only where that result beats break-even.
+ * works.
+ *
+ * Frequency: the choice is made once for each minimum share of candles with an arrow (FREQUENCIES),
+ * among the versions that give arrows at least that often. More arrows cost win rate (the logic has
+ * to accept weaker setups); the check shows how much, so the user can choose.
  *
  * Candles: [{from, open, high, low, close}] oldest first (one candle size).
  */
@@ -19,12 +24,15 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const CANDLE_CHOICES = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30];
-  const ZONE_CHOICES = [0, 10, 20, 30];
+  const CANDLE_CHOICES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30];
+  const ZONE_CHOICES = [0, 10, 20, 30, 40, 50];
   const BODY_CHOICES = [0, 30, 60];
   const CURRENT = Object.freeze({ method: 'breakout', brkCandles: 5, brkZone: 0, brkBody: 0, reverse: false });
   const LEARN_END = 0.6, CHOOSE_END = 0.8;
   const MIN_LEARN = 50, MIN_CHOOSE = 20, MIN_CHECK = 30, SHORTLIST = 10;
+  // Minimum share of candles with an arrow (the "Arrows" setting): the best logic is chosen for each.
+  // 0 = no minimum (best win rate); 0.25 = at least 1 candle in 4 (about 15 an hour on 1-minute candles).
+  const FREQUENCIES = Object.freeze([0, 0.1, 0.25, 0.5, 0.9]);
 
   function wilson(w, n) {
     if (!n) return [0, 1];
@@ -84,17 +92,22 @@
   }
 
   // Wins and decided arrows (ties left out) of the arrows from index `from` to `to` (excluded);
-  // cw / cn: the same for the CALL arrows only (the PUT arrows are the rest).
+  // cw / cn: the same for the CALL arrows only (the PUT arrows are the rest); f: arrows whose candle
+  // has an outcome (ties included) and m: candles with an outcome, for the share of candles with an arrow.
   function score(arrows, y, from, to) {
-    let w = 0, n = 0, cw = 0, cn = 0;
+    let w = 0, n = 0, cw = 0, cn = 0, f = 0, m = 0;
     for (let i = from; i < to; i++) {
       const a = arrows[i], r = y[i];
-      if (a === 0 || !(r === 1 || r === -1)) continue;
+      if (!(r === 1 || r === -1 || r === 0)) continue; // a gap: the next candle is not known
+      m += 1;
+      if (a === 0) continue;
+      f += 1;
+      if (r === 0) continue;
       n += 1;
       if (a === r) w += 1;
       if (a === 1) { cn += 1; if (r === 1) cw += 1; }
     }
-    return { w, n, cw, cn };
+    return { w, n, cw, cn, f, m };
   }
 
   function rateOf(w, n) {
@@ -102,9 +115,11 @@
     return { wins: w, n, rate: n ? w / n : NaN, lo, hi };
   }
 
-  // {wins, n, rate, lo, hi} of all the arrows, and the same for the CALL and the PUT arrows.
+  // {wins, n, rate, lo, hi} of all the arrows, the same for the CALL and the PUT arrows, and the
+  // share of candles with an arrow (coverage).
   function stats(s) {
-    return Object.assign(rateOf(s.w, s.n), { call: rateOf(s.cw, s.cn), put: rateOf(s.w - s.cw, s.n - s.cn) });
+    return Object.assign(rateOf(s.w, s.n), { call: rateOf(s.cw, s.cn), put: rateOf(s.w - s.cw, s.n - s.cn),
+      coverage: s.m ? s.f / s.m : 0 });
   }
 
   // Wins of the arrows of candles [from, to) when the option is bought a few seconds after the
@@ -140,17 +155,21 @@
     return out;
   }
 
-  // Learns the logic of one asset. options: {size (s), target (0-1, default 0.9), pause: () => Promise
-  // (called now and then so the page stays responsive)}. Returns the chosen rules and the
-  // learn / choose / check results of it and of the current logic.
+  // Learns the logic of one asset. options: {size (s), target (0-1, default 0.9), frequencies (minimum
+  // shares of candles with an arrow, default FREQUENCIES), pause: () => Promise (called now and then so
+  // the page stays responsive)}. Returns, for each frequency, the chosen rules and their learn /
+  // choose / check results (levels); the top level repeats the first frequency's (no minimum), next
+  // to the results of the current logic.
   async function learn(candles, options) {
     const o = options || {};
     const target = o.target === undefined ? 0.9 : o.target;
+    const frequencies = o.frequencies || FREQUENCIES;
     const n = candles.length;
     const a = Math.floor(n * LEARN_END), b = Math.floor(n * CHOOSE_END);
     const y = outcomes(candles, o.size);
     const cache = {};
     const parts = (arrows) => ({ learn: score(arrows, y, 0, a), choose: score(arrows, y, a, b), check: score(arrows, y, b, n) });
+    const cover = (s) => (s.m ? s.f / s.m : 0);
 
     const current = parts(breakoutArrows(candles, CURRENT, cache));
     const all = versions();
@@ -167,24 +186,35 @@
       learned.push(entry);
       if (!bestLearn || s.w / s.n > bestLearn.learn.w / bestLearn.learn.n) bestLearn = entry;
       // The target counts only when it also holds on the candles the version was not adjusted on.
-      if (s.w / s.n >= target) {
+      if (!reached && s.w / s.n >= target) {
         const p = parts(arrows);
         if (p.choose.n >= MIN_CHOOSE && p.check.n >= MIN_CHECK && p.choose.w / p.choose.n >= target && p.check.w / p.check.n >= target) {
           reached = Object.assign(entry, p);
-          break;
         }
       }
     }
 
-    let pick = reached;
-    if (!pick) {
-      learned.sort((x, z) => z.lo - x.lo);
-      const shortlist = learned.slice(0, SHORTLIST).map((e) => Object.assign(e, parts(breakoutArrows(candles, e.rules, cache))));
-      const ranked = shortlist.filter((e) => e.choose.n >= MIN_CHOOSE)
-        .sort((x, z) => wilson(z.choose.w, z.choose.n)[0] - wilson(x.choose.w, x.choose.n)[0]);
-      pick = ranked[0] || shortlist[0] || null;
+    // For each frequency: the 10 best versions on the oldest candles among those that give at least
+    // that share of candles an arrow, then the best of them on the next candles (where they must
+    // still come about as often).
+    learned.sort((x, z) => z.lo - x.lo);
+    const levels = {};
+    for (const f of frequencies) {
+      let pick = reached && cover(reached.learn) >= f ? reached : null;
+      if (!pick) {
+        const shortlist = learned.filter((e) => cover(e.learn) >= f).slice(0, SHORTLIST)
+          .map((e) => (e.choose ? e : Object.assign(e, parts(breakoutArrows(candles, e.rules, cache)))));
+        const ranked = shortlist.filter((e) => e.choose.n >= MIN_CHOOSE && cover(e.choose) >= 0.8 * f)
+          .sort((x, z) => wilson(z.choose.w, z.choose.n)[0] - wilson(x.choose.w, x.choose.n)[0]);
+        pick = ranked[0] || shortlist[0] || null;
+      }
+      levels[String(f)] = pick
+        ? { rules: Object.assign({}, pick.rules), learn: stats(pick.learn), choose: stats(pick.choose), check: stats(pick.check) }
+        : null; // no version gives arrows that often here
     }
-    const result = {
+    const first = levels[String(frequencies[0])] ||
+      { rules: Object.assign({}, CURRENT), learn: stats(current.learn), choose: stats(current.choose), check: stats(current.check) };
+    return {
       candles: n,
       size: o.size || null,
       from: n ? candles[0].from : null,
@@ -195,19 +225,19 @@
       reached: !!reached,
       current: { learn: stats(current.learn), choose: stats(current.choose), check: stats(current.check) },
       bestLearn: bestLearn ? { rules: bestLearn.rules, learn: stats(bestLearn.learn) } : null,
-      rules: pick ? Object.assign({}, pick.rules) : Object.assign({}, CURRENT),
-      learn: pick ? stats(pick.learn) : stats(current.learn),
-      choose: pick ? stats(pick.choose) : stats(current.choose),
-      check: pick ? stats(pick.check) : stats(current.check),
+      levels,
+      rules: Object.assign({}, first.rules),
+      learn: first.learn,
+      choose: first.choose,
+      check: first.check,
     };
-    return result;
   }
 
   // Short description of breakout rules, e.g. "breakout 8 candles, zone 10%, body 30%, reversed".
   function describe(rules) {
     if (!rules || rules.method === 'vote') return '15-strategy vote' + (rules && rules.reverse ? ', reversed' : '');
-    return 'breakout ' + rules.brkCandles + ' candles' +
-      (rules.brkZone ? ', close within ' + rules.brkZone + '%' : ', close at the high / low') +
+    return 'breakout ' + rules.brkCandles + (rules.brkCandles === 1 ? ' candle' : ' candles') +
+      (rules.brkZone >= 50 ? ', close in the upper / lower half' : rules.brkZone ? ', close within ' + rules.brkZone + '%' : ', close at the high / low') +
       (rules.brkBody ? ', body at least ' + rules.brkBody + '%' : '') +
       (rules.reverse ? ', reversed (fade)' : '');
   }
@@ -270,21 +300,29 @@
     }
 
     // A learned logic that beats a coin flip on its check candles is measured again there with the
-    // price 5 s after each candle's open (the extension buys about 2 s after it): on real markets
-    // much of a short-term edge is gone after the first seconds.
+    // price 5 s after each candle's open (a cautious measure: the extension buys about 0.1 s after
+    // it): on real markets much of a short-term edge is gone after the first seconds. The 5-second
+    // candles are downloaded once and serve the logic of every frequency.
     async function confirmLate(activeId, size, name, candles, result, background) {
-      const start = candles[Math.floor(candles.length * CHOOSE_END)].from;
+      const from = Math.floor(candles.length * CHOOSE_END);
+      const start = candles[from].from;
       const want = Math.min(MAX_FIVE_SEC, Math.ceil((nowSec() - start) / 5) + 1000);
       trader.setLearning({ step: 'realistic entry (5-second candles)', fetched: 0, wanted: want });
       const five = await fetchCandles(activeId, 5, want, start, background);
       if (!five) return;
       const prices = new Map();
       for (const c of five) if (c.from % size === 0) prices.set(c.from, c.close);
-      const arrows = breakoutArrows(candles, result.rules);
-      const s = lateScore(candles, arrows, Math.floor(candles.length * CHOOSE_END), candles.length, prices, size);
-      result.late = stats(s);
-      result.lateCoverage = s.total ? (s.total - s.missing) / s.total : 0;
+      const cache = {};
+      for (const level of [result].concat(Object.values(result.levels || {}))) {
+        if (!level) continue;
+        const s = lateScore(candles, breakoutArrows(candles, level.rules, cache), from, candles.length, prices, size);
+        level.late = stats(s);
+        level.lateCoverage = s.total ? (s.total - s.missing) / s.total : 0;
+      }
     }
+
+    // A logic worth measuring with the realistic entry: it beats a coin flip on its check candles.
+    const promising = (level) => !!level && level.check.n >= MIN_CONFIRM && level.check.lo >= 0.5;
 
     async function learnOne(activeId, size, name, background) {
       const s = trader.settings;
@@ -297,10 +335,10 @@
           rules: Object.assign({}, CURRENT), check: stats({ w: 0, n: 0, cw: 0, cn: 0 }), parts: { learn: 0, choose: 0, check: 0 } });
         return;
       }
-      trader.setLearning({ step: 'trying 264 versions of the logic' });
+      trader.setLearning({ step: 'trying ' + versions().length + ' versions of the logic' });
       const result = await learn(candles, { size, target: s.target / 100, pause: () => sleep(0) });
       Object.assign(result, { name, activeId, learnedAt: nowSec(), wanted: s.learnCandles });
-      if (result.check.n >= MIN_CONFIRM && result.check.lo >= 0.5 && size % 5 === 0) {
+      if (size % 5 === 0 && [result].concat(Object.values(result.levels)).some(promising)) {
         result.lateTried = true;
         try { await confirmLate(activeId, size, name, candles, result, background); } catch (_) { /* unconfirmed: not traded */ }
         if (stopped || (background && interrupt)) return;
@@ -310,17 +348,26 @@
       const late = result.late;
       const split = (x) => ' (CALL ' + (x.call.n ? (100 * x.call.rate).toFixed(1) + '% of ' + x.call.n : 'none') +
         ', PUT ' + (x.put.n ? (100 * x.put.rate).toFixed(1) + '% of ' + x.put.n : 'none') + ')';
+      const perHour = 3600 / size;
+      const byFrequency = FREQUENCIES.map((f) => {
+        const lv = result.levels[String(f)];
+        if (!lv) return null;
+        const j = lv.late && lv.late.n >= MIN_CONFIRM ? lv.late : lv.check;
+        return (f ? Math.round(100 * f) + '%+' : 'any') + ' ' + (j.n ? (100 * j.rate).toFixed(1) + '%' : '-') +
+          ' (' + Math.round(lv.check.coverage * perHour) + '/h)';
+      }).filter(Boolean).join(', ');
       trader.log('Learned ' + name + ' on ' + candles.length.toLocaleString() + ' candles: ' + describe(result.rules) + '. Check (newest ' +
         result.parts.check.toLocaleString() + ' candles): ' + (c.n ? (100 * c.rate).toFixed(1) + '% of ' + c.n + ' arrows' + split(c) : 'no arrows') +
         (late ? ', with the price 5 s after the open ' + (late.n ? (100 * late.rate).toFixed(1) + '% of ' + late.n + split(late) : 'no data') : '') +
-        ' - target ' + Math.round(100 * result.target) + '% ' + (result.reached ? 'reached.' : 'not reached.'));
+        '. By share of candles with an arrow: ' + byFrequency + ' - target ' + Math.round(100 * result.target) + '% ' +
+        (result.reached ? 'reached.' : 'not reached.'));
     }
 
     // Learned before the realistic-entry check existed (or it was never tried): learn again.
-    const unconfirmed = (r) => !!r && !r.tooShort && !!r.check && r.check.n >= MIN_CONFIRM && r.check.lo >= 0.5 &&
-      !r.lateTried && (r.size || 60) % 5 === 0;
-    // Learned before CALL and PUT arrows were counted apart: learned again when it is selected.
-    const noSides = (r) => !!r && !r.tooShort && !!r.check && !r.check.call;
+    const unconfirmed = (r) => !!r && !r.tooShort && !!r.check && !r.lateTried && (r.size || 60) % 5 === 0 &&
+      [r].concat(Object.values(r.levels || {})).some(promising);
+    // Learned before the logic was chosen for each frequency (and CALL and PUT counted apart).
+    const outdated = (r) => !!r && !r.tooShort && !r.levels;
 
     async function nextAsset() {
       if (nowSec() - listAt > LIST_EVERY_SEC || !list.length) {
@@ -329,7 +376,7 @@
       }
       const fresh = (a) => {
         const r = trader.learned[a.activeId + '/60'];
-        return r && nowSec() - (r.learnedAt || 0) < RELEARN_OTHERS_SEC && !unconfirmed(r);
+        return r && nowSec() - (r.learnedAt || 0) < RELEARN_OTHERS_SEC && !unconfirmed(r) && !outdated(r);
       };
       trader.setLearning({ done: list.filter(fresh).length, total: list.length });
       return list.find((a) => !fresh(a)) || null;
@@ -341,7 +388,7 @@
       const key = trader.learnedKey(t);
       const mine = key ? trader.learned[key] : null;
       const forced = force === key;
-      if (key && (forced || (s.useLearned && (!mine || unconfirmed(mine) || noSides(mine) || nowSec() - (mine.learnedAt || 0) > RELEARN_SELECTED_SEC ||
+      if (key && (forced || (s.useLearned && (!mine || unconfirmed(mine) || outdated(mine) || nowSec() - (mine.learnedAt || 0) > RELEARN_SELECTED_SEC ||
           mine.wanted !== s.learnCandles || (mine.target !== undefined && Math.round(100 * mine.target) !== s.target))))) {
         force = '';
         interrupt = false;
@@ -400,5 +447,6 @@
     };
   }
 
-  return { learn, breakoutArrows, outcomes, score, lateScore, stats, wilson, describe, versions, createLearningQueue, CURRENT, LEARN_END, CHOOSE_END };
+  return { learn, breakoutArrows, outcomes, score, lateScore, stats, wilson, describe, versions, createLearningQueue, CURRENT,
+    FREQUENCIES, LEARN_END, CHOOSE_END };
 });

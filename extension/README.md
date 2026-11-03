@@ -24,6 +24,11 @@ or LOWER right away, exactly as the [chart script](../README.md) tells you to tr
 - **It learns the best logic for each asset** (on its own history, one asset after another) and
   uses it when you select that asset. It aims for the 90% you asked for, but judges every logic on
   candles it did not learn from: so far none came near 90% (see [Learning](#learning-the-best-logic-for-each-asset)).
+- **You choose how often arrows come** (**Arrows**): from the best win rate (fewest arrows) to an
+  arrow on almost every candle. The panel shows, for the selected asset, how many arrows an hour and
+  what win rate each choice gave on candles it did not learn from. On the OTC assets more arrows cost
+  nothing (about 50% either way); on real markets they cost 1 to 2 points
+  ([research, round 5](../research/README.md#round-5-more-frequent-arrows)).
 - **Your account may be at risk.** Brokers often forbid automated trading, and IQ Option's terms
   reportedly prohibit automated tools and allow such accounts to be blocked. Read the current
   [Terms & Conditions](https://iqoption.com/en/terms-and-conditions/terms-conditions) before you use
@@ -94,11 +99,12 @@ right after the option has ended, so the traderoom is always ready for the next 
 |---|---|
 | Title bar | **–** folds the panel to its title; **⏻** exits (see [Install](#install)). |
 | Asset line | What is followed: asset, option type, candle size, expiry and payout; under it the connection, the seconds to the next candle and the price. |
-| **Win rate** card | How the logic used here did on this asset: for a learned logic, its result on the newest candles of its learning history, which were never used to choose it (with the price 5 s after the open where that was measured: "entry +5 s"); otherwise the panel's rules replayed on the last 5,000 candles. Arrows tested, and the win rate needed to break even. Below: the **CALL** and the **PUT** arrows apart, each with its win rate and number of arrows (hover for its 95% range); a direction that is not bought is dimmed. Colours: green when even the low end of the 95% range beats break-even, red below break-even, plain in between. |
+| **Win rate** card | How the logic used here did on this asset: for a learned logic, its result on the newest candles of its learning history, which were never used to choose it (with the price 5 s after the open where that was measured: "entry +5 s"); otherwise the panel's rules replayed on the last 5,000 candles. Arrows tested, how many an hour, and the win rate needed to break even. Below: the **CALL** and the **PUT** arrows apart, each with its win rate and number of arrows (hover for its 95% range); a direction that is not bought is dimmed. Colours: green when even the low end of the 95% range beats break-even, red below break-even, plain in between. |
 | **Candle** card | The arrow of the candle that is open now: CALL (higher), PUT (lower) or no arrow, and what was done with it (for example "bought 0.2 s after the open", or "not bought (CALL only)"). |
 | Reason line | What it does here: trading every arrow, or the CALL or PUT arrows only, at once (with their win rate here when it is below break-even), or why not: an option type it cannot trade, a closed asset, no edge (only with "Only trade where it has an edge" on), or auto-trading off. |
 | **AUTO-TRADE** | Switches automatic trading on and off. Green = practice, red = real money. |
 | **Buy** | Which arrows auto-trade buys: **Both** (default), **▲ CALL only** (higher) or **▼ PUT only** (lower). The other arrows still show on the chart and in the panel, and are not bought. |
+| **Arrows** | How often arrows come: **Best win rate (fewest)**, **1 candle in 10 or more**, **1 in 4** (default), **1 in 2**, or **Almost every candle**. Each choice shows, for the selected asset, the arrows an hour and the win rate its learned logic gave on the check candles (with the price 5 s after the open where that was measured); "not possible here" when no version gives arrows that often. Changing it switches every asset to its logic for that frequency at once, and the chart script follows (reload the chart to see it). |
 | Practice / Real | Which balance pays the stakes, with both balances, updated as they change (trades from the extension or the traderoom, results, deposits). Changing it always switches auto-trading off. Real money also needs the tick "I accept trading with REAL money". |
 | Stake | Amount of each option (minimum 1), and this session's trades and P/L. |
 | **Logic for this asset** | The logic used here (learned, and when; or the panel's rules), the default logic's win rate next to the learned one's on the same newest candles (and the learned one's with the price 5 s after the open), and whether the target (90%) was reached. **Learn now** / **Learn again** learns this asset at once, with a progress bar. The last line tells whether the chart script has the learned logic, with **Reload chart** when the chart must reload to show this asset's new logic (see [The chart](#the-chart-shows-the-learned-logic-too)). |
@@ -131,29 +137,32 @@ own history, keeps it, and uses it whenever you select that asset (with the same
    than 6 hours old, or when you press **Learn now** / **Learn again**, the extension downloads its candles
    (20,000 by default: about 14 days of 1-minute candles; up to 60,000), newest first.
 2. **It runs the current logic** (5-candle breakout) and counts its arrows, wins and losses, then
-   **adjusts it and counts again**: lookback 2 to 30 candles, how close to the high / low the close
-   must be (0 to 30% of the range), a minimum candle body (0, 30 or 60%), and follow or reverse.
-   That is 264 versions, about a quarter of a second of work.
-3. **It stops early when a version reaches the target win rate** (90% by default) on candles it was
-   not adjusted on. Otherwise it keeps the best version.
-4. **Realistic entry.** When the chosen version beats a coin flip on its check candles, the extension
-   downloads 5-second candles for that period and measures it again with the price 5 s after each
-   candle's open (a cautious measure: the extension used to buy about 2 s after the open, and now
-   buys about 0.1 s after it). On real markets much of a 1-minute edge happens in the first seconds.
-   That second measurement is the one the panel shows; with "Only trade where it has an edge" on,
-   a logic that could not be measured this way is not traded.
+   **adjusts it and counts again**: lookback 1 to 30 candles, how close to the high / low the close
+   must be (0 to 50% of the range: 50% means "in the upper / lower half"), a minimum candle body (0,
+   30 or 60%), and follow or reverse. That is 432 versions, under a second of work. It also counts on
+   what share of the candles each version gives an arrow.
+3. **It chooses a logic for each frequency of the Arrows setting**: the best version overall, and the
+   best among those that give an arrow on at least 1 candle in 10, 1 in 4, 1 in 2, or almost every
+   candle. The setting picks one of them, at once (no new learning). A version that reaches the target
+   win rate (90% by default) also on candles it was not adjusted on is chosen at once.
+4. **Realistic entry.** When a chosen version beats a coin flip on its check candles, the extension
+   downloads 5-second candles for that period and measures every chosen version again with the price
+   5 s after each candle's open (a cautious measure: the extension used to buy about 2 s after the
+   open, and now buys about 0.1 s after it). On real markets much of a 1-minute edge happens in the
+   first seconds. That second measurement is the one the panel shows; with "Only trade where it has
+   an edge" on, a logic that could not be measured this way is not traded.
 5. **Then the other open assets, one by one** ("Learn all open assets", on by default): every asset
    that can be traded with a 1-minute option at the moment, each learned again after 24 hours. About
    20 seconds per asset; the requests are paced and stay away from candle opens.
 
-**How "best" is decided, and why the panel shows a lower number than the best one found.** With 264
+**How "best" is decided, and why the panel shows a lower number than the best one found.** With 432
 versions, some always look good on past candles by luck: in the [research](../research/README.md),
 rules that won 92% on past candles won 51% afterwards. So the history is split by time:
 
 | Part | Candles (of 20,000) | Used for |
 |---|---|---|
 | Oldest 60% | 12,000 | Every version is measured here ("adjusted on"). |
-| Next 20% | 4,000 | The 10 best versions are compared here; the best one is chosen. |
+| Next 20% | 4,000 | The 10 best versions are compared here (for a frequency: the 10 best that give arrows that often, and they must still give them about that often here); the best one is chosen. |
 | Newest 20% | 4,000 | The chosen version is measured once (**check**). Nothing was chosen here. |
 
 The **check** result is what the panel shows and what decides whether the asset is traded: with
@@ -278,7 +287,7 @@ holds the 1,000 real candles used by the tests.
 | [src/signal-engine.js](src/signal-engine.js) | The Next Minute signal (port of `src/core.lua`). Keep both in step. |
 | [src/iq-client.js](src/iq-client.js) | IQ Option WebSocket client: login, candles, payout, asset names, Binary / Blitz / Digital orders, results, chart scripts. |
 | [src/trader.js](src/trader.js) | Follows the selection, candle cycle, Digital options and prices, balances, learned logic per asset, safety checks, orders, results and stop rules. |
-| [src/learner.js](src/learner.js) | Learns the best logic of an asset (264 versions, learn / choose / check split) and the learning queue. |
+| [src/learner.js](src/learner.js) | Learns the best logic of an asset for each frequency (432 versions, learn / choose / check split) and the learning queue. |
 | [src/chart-script.js](src/chart-script.js) | Writes the learned table into the account's chart scripts (compact copy under IQ Option's length limit). |
 | [src/lua-scripts.js](src/lua-scripts.js) | The two chart scripts as text, generated by `build.py` from `src/*.lua`: do not edit. |
 | [src/new-option.js](src/new-option.js) | Finds and presses the traderoom's **+ NEW OPTION** button between deals. |

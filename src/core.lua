@@ -14,8 +14,8 @@ local METHODS = { "Breakout momentum", "15-strategy vote" }
 input_group {
     "Signal rules",
     method      = input (1, "Signal method", input.string_selection, METHODS),
-    brk_candles = input (5, "Breakout: candles", input.integer, 2, 60),
-    brk_zone    = input (0, "Breakout: close within (% of range)", input.integer, 0, 45),
+    brk_candles = input (5, "Breakout: candles", input.integer, 1, 60),
+    brk_zone    = input (0, "Breakout: close within (% of range)", input.integer, 0, 50),
     brk_body    = input (0, "Breakout: minimum body (% of candle)", input.integer, 0, 90),
     reverse     = input (false, "Reverse the arrows (fade)", input.boolean),
     min_score   = input (0.30, "Vote: minimum agreement score", input.double, 0.05, 1, 0.05),

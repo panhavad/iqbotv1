@@ -17,6 +17,9 @@
 
   const HISTORY = 1000;
   const MAX_ENTRY_SEC = 25; // IQ Option stops selling the current minute 30 s before it ends.
+  // The "Arrows" setting: minimum share of candles with an arrow. The learner chooses each asset's
+  // logic once for each of these (learner.js FREQUENCIES: keep both lists equal).
+  const FREQUENCIES = Object.freeze([0, 0.1, 0.25, 0.5, 0.9]);
   const LAYOUT_EVERY_SEC = 3; // how often the traderoom selection is read
   const HINT_SEC = 10; // how long a selection seen in the traderoom waits for the traderoom to save it
   const EDGE_CANDLES = 5000; // recent candles replayed to measure the method on the followed asset
@@ -46,6 +49,7 @@
     maxSessionLoss: 10,     // stop when the session has lost this much
     requireEdge: false,     // true: trade only where the logic recently beat break-even (lower 95% bound)
     directions: 'both',     // arrows to buy: 'both', 'call' (CALL / higher only) or 'put' (PUT / lower only)
+    frequency: 0.25,        // "Arrows": minimum share of candles with an arrow (FREQUENCIES); 0 = best win rate
     useLearned: true,       // use the logic learned for the selected asset (learner.js)
     learnAll: true,         // learn every open asset one by one in the background
     learnCandles: 20000,    // candles of history to learn from (most recent first)
@@ -76,6 +80,10 @@
     out.realConfirmed = !!out.realConfirmed;
     out.requireEdge = out.requireEdge === true;
     out.directions = out.directions === 'call' || out.directions === 'put' ? out.directions : 'both';
+    const f = Number(out.frequency);
+    out.frequency = Number.isFinite(f)
+      ? FREQUENCIES.reduce((best, x) => (Math.abs(x - f) < Math.abs(best - f) ? x : best), FREQUENCIES[0])
+      : DEFAULT_SETTINGS.frequency;
     out.useLearned = out.useLearned !== false;
     out.learnAll = out.learnAll !== false;
     out.learnCandles = Math.min(MAX_LEARN_CANDLES, Math.max(2000, Math.round(Number(out.learnCandles) || 20000)));
@@ -97,6 +105,13 @@
   }
 
   const SIDE_LABEL = { call: 'CALL', put: 'PUT' };
+
+  // "best win rate" (no minimum), "at least 1 candle in 4", ..., "almost every candle".
+  function frequencyLabel(f) {
+    if (!f) return 'best win rate (fewest arrows)';
+    if (f >= 0.9) return 'almost every candle';
+    return 'at least 1 candle in ' + Math.round(1 / f);
+  }
 
   // The reason to leave an arrow out because of its direction ("Buy": CALL only / PUT only), or ''.
   function sideFilter(s, direction) {
@@ -212,11 +227,43 @@
       return r && !r.tooShort ? r : null; // too little history: the panel's rules apply
     }
 
+    // The part of a learned result for the chosen frequency ("Arrows"): {rules, learn, choose, check,
+    // late?}. When no logic gives arrows that often there, the next lower frequency's; a result
+    // learned before frequencies existed has one logic only.
+    levelOf(r) {
+      if (!r || !r.levels) return r || null;
+      for (const f of FREQUENCIES.filter((x) => x <= this.settings.frequency).reverse()) {
+        const level = r.levels[String(f)];
+        if (level) return level;
+      }
+      return r;
+    }
+
     // The rules used for an asset: its learned logic when there is one (and it is switched on),
     // otherwise the rules of the panel.
     rules(t) {
       const l = this.settings.useLearned ? this.learnedFor(t) : null;
-      return l ? Object.assign({}, this.settings.rules, l.rules) : this.settings.rules;
+      return l ? Object.assign({}, this.settings.rules, this.levelOf(l).rules) : this.settings.rules;
+    }
+
+    // The learned result of the followed asset, with the logic of the chosen frequency on top.
+    learnedView() {
+      const r = this.learnedFor();
+      if (!r) return null;
+      const level = this.levelOf(r);
+      return Object.assign({}, r, { rules: level.rules, learn: level.learn, choose: level.choose, check: level.check,
+        late: level.late, lateCoverage: level.lateCoverage });
+    }
+
+    // Every asset's learned rules at the chosen frequency: the chart script's table.
+    learnedTable() {
+      const out = {};
+      for (const [key, r] of Object.entries(this.learned)) {
+        if (!r) continue;
+        const level = this.levelOf(r);
+        out[key] = { name: r.name, tooShort: !!r.tooShort, rules: level && level.rules };
+      }
+      return out;
     }
 
     // Stores a learned logic; applies it at once when it is the followed asset's.
@@ -263,6 +310,9 @@
       }
       if (next.directions !== before.directions) {
         this.log(next.directions === 'both' ? 'Buying CALL and PUT arrows.' : 'Buying ' + SIDE_LABEL[next.directions] + ' arrows only.');
+      }
+      if (next.frequency !== before.frequency) {
+        this.log('Arrows: ' + frequencyLabel(next.frequency) + ' (the learned logic of each asset for that frequency).');
       }
       const appliedBefore = JSON.stringify(this.rules());
       this.settings = next;
@@ -628,12 +678,14 @@
       if (learned) {
         // Judged with the price 5 s after the open when measured; a logic that beats a coin flip
         // from the open but could not be measured that way is not trusted.
-        const late = learned.late && learned.late.n >= 30 ? learned.late : null;
-        const c = late || learned.check;
+        const level = this.levelOf(learned);
+        const late = level.late && level.late.n >= 30 ? level.late : null;
+        const c = late || level.check;
         this.edgeAt = this.nowSec();
         this.edge = { wins: c.wins, n: c.n, rate: c.rate, lo: c.lo, hi: c.hi, candles: learned.parts.check, learned: true,
-          late: !!late, unconfirmed: !late && learned.check.n >= 30 && learned.check.lo >= 0.5,
-          call: c.call || null, put: c.put || null }; // null: learned before CALL and PUT were counted apart
+          late: !!late, unconfirmed: !late && level.check.n >= 30 && level.check.lo >= 0.5,
+          call: c.call || null, put: c.put || null, // null: learned before CALL and PUT were counted apart
+          coverage: Number.isFinite(level.check.coverage) ? level.check.coverage : null };
         this.changed();
         return;
       }
@@ -652,9 +704,10 @@
           to = older[0].from - 1;
         }
         const engine = SignalEngine.createEngine(this.rules(t));
-        let wins = 0, n = 0, cw = 0, cn = 0, previous = 0;
+        let wins = 0, n = 0, cw = 0, cn = 0, fired = 0, previous = 0;
         for (const c of rows) {
           if (previous !== 0) {
+            fired += 1;
             const move = Math.sign(c.close - c.open);
             if (move !== 0) {
               n += 1;
@@ -665,7 +718,8 @@
           previous = engine.update(engineCandle(c)).decision;
         }
         // Break-even follows the payout, which changes all the time on Digital (see breakEven()).
-        this.edge = Object.assign(rateOf(wins, n), { candles: rows.length, call: rateOf(cw, cn), put: rateOf(wins - cw, n - cn) });
+        this.edge = Object.assign(rateOf(wins, n), { candles: rows.length, call: rateOf(cw, cn), put: rateOf(wins - cw, n - cn),
+          coverage: rows.length > 1 ? fired / (rows.length - 1) : null });
         const be = this.breakEven();
         const part = (w, k) => (k ? (100 * w / k).toFixed(1) + '% of ' + k : 'none');
         this.log('Last ' + rows.length.toLocaleString() + ' candles of ' + (t.name || 'this asset') + ': ' + n + ' arrows, ' +
@@ -1150,7 +1204,8 @@
         trades: this.trades.slice(0, 10),
         log: this.logLines.slice(0, 30),
         rules: this.rules(),
-        learnedHere: this.settings.useLearned ? this.learnedFor() : null,
+        learnedHere: this.settings.useLearned ? this.learnedView() : null,
+        frequencies: FREQUENCIES,
         learning: this.learning,
         learnedCount: Object.keys(this.learned).length,
         best: this.bestLearned(5),
@@ -1158,18 +1213,20 @@
       };
     }
 
-    // Assets whose learned logic did best on its check candles (lower end of the 95% range first),
-    // with the price 5 s after the open where that was measured.
+    // Assets whose learned logic (at the chosen frequency) did best on its check candles (lower end
+    // of the 95% range first), with the price 5 s after the open where that was measured.
     bestLearned(count) {
-      const judged = (r) => (r.late && r.late.n >= 30 ? r.late : r.check);
+      const judged = (lv) => (lv.late && lv.late.n >= 30 ? lv.late : lv.check);
       return Object.values(this.learned)
-        .filter((r) => r && r.check && judged(r).n >= 30)
-        .sort((a, b) => judged(b).lo - judged(a).lo)
+        .filter((r) => r && r.check && !r.tooShort)
+        .map((r) => ({ r, lv: this.levelOf(r) }))
+        .filter(({ lv }) => lv && lv.check && judged(lv).n >= 30)
+        .sort((a, b) => judged(b.lv).lo - judged(a.lv).lo)
         .slice(0, count)
-        .map((r) => {
-          const c = judged(r);
+        .map(({ r, lv }) => {
+          const c = judged(lv);
           return { name: r.name, size: r.size, rate: c.rate, n: c.n, lo: c.lo, hi: c.hi, reached: r.reached && c.rate >= r.target,
-            late: c === r.late, open: r.check.rate };
+            late: c === lv.late, open: lv.check.rate };
         });
     }
   }
@@ -1191,5 +1248,5 @@
 
   function round2(x) { return Math.round(x * 100) / 100; }
 
-  return { AutoTrader, DEFAULT_SETTINGS, clampSettings, KIND_OF, digitalPayouts, digitalSymbol };
+  return { AutoTrader, DEFAULT_SETTINGS, clampSettings, KIND_OF, FREQUENCIES, frequencyLabel, digitalPayouts, digitalSymbol };
 });

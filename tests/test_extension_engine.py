@@ -92,12 +92,16 @@ class ExtensionEngineParityTests(unittest.TestCase):
             {"Breakout: candles": 30, "Breakout: close within (% of range)": 45, "Breakout: minimum body (% of candle)": 30},
             {METHOD: 2, "Reverse the arrows (fade)": True, "Vote: minimum agreement score": 0.05,
              "Vote: minimum agreeing strategies": 1},
+            # The most frequent settings: one candle, its upper / lower half (an arrow on almost every candle).
+            {"Breakout: candles": 1, "Breakout: close within (% of range)": 50, "Reverse the arrows (fade)": True},
+            {"Breakout: candles": 4, "Breakout: close within (% of range)": 40},
         ]
         for i, inputs in enumerate(cases):
             for (market, generate), seed in zip(MARKETS.items(), (61, 62, 63)):
                 with self.subTest(inputs=inputs, market=market):
                     self.check(generate(900, seed=seed + 10 * i), inputs, min_arrows=10)
         self.check(real_candles(), cases[2], min_arrows=10)
+        self.check(real_candles(), cases[5], min_arrows=500)
 
 
 if __name__ == "__main__":

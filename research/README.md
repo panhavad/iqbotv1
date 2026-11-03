@@ -97,9 +97,9 @@ You asked for the logic to be learned asset by asset: run the current logic over
 possible, count arrows, wins and losses, adjust it and count again until it reaches 90%, store the
 best logic per asset and use it when that asset is selected. The extension now does exactly that,
 continuously ([extension/README.md](../extension/README.md#learning-the-best-logic-for-each-asset),
-`extension/src/learner.js`): 264 versions of the breakout (lookback, zone, body, follow or reverse)
-on each asset's last 20,000 candles, chosen on the older 80% and checked on the newest 20%, then
-checked again with the price 5 s after the open.
+`extension/src/learner.js`): 264 versions of the breakout (lookback, zone, body, follow or reverse;
+432 since round 5) on each asset's last 20,000 candles, chosen on the older 80% and checked on the
+newest 20%, then checked again with the price 5 s after the open.
 
 Results on 2 Nov 2026, all 123 assets open at the time: **no asset's logic reached 90%** on its
 check candles. The best version of each asset won a median 54.9% (up to 65.6%) on the candles it was
@@ -108,6 +108,82 @@ check, real NZD/USD at 61.0% from the open, fell to 54.8% with the realistic ent
 the extension's trading gate. This repeats rounds 1-3 on more assets: on IQ Option's 1-minute
 candles, adjusting a rule until it looks good on past candles produces a rule that is about a coin
 flip on the next ones.
+
+## Round 5: more frequent arrows
+
+You asked for arrows more often. The learned logic gave an arrow on about 1 candle in 10 to 20
+(on real EUR/USD about 5 an hour; with "CALL only", half that). This round asks what a logic that
+fires far more often can win (`frequency.py`, `results-frequency.md`).
+
+**What the literature says** (a search of academic and regulator sources; the details are in the
+references below):
+
+- At 1 to 5 minutes, the effects that hold up are tiny. Prices that bounce between bid and ask make
+  successive moves slightly opposite (Roll 1984; Müller, Dacorogna et al. 1990 for currencies), and
+  intraday momentum exists but explains well under 1% of the next move in normal times (Gao, Han, Li
+  & Zhou 2018). On Bitcoin, intraday momentum and reversal both appear (Wen, Bouri, Xu & Zhao 2022).
+- **Frequency and accuracy are the same dial.** A rule that fires on few candles is a classifier
+  with a high confidence threshold; lowering the threshold gives more arrows and pulls the win rate
+  towards 50% (selective classification: Geifman & El-Yaniv 2017; meta-labeling: López de Prado 2018,
+  Joubert 2022).
+- Candlestick patterns had no reliable edge once tested for data snooping (Marshall, Young & Rose
+  2006); searching many rules makes the best one look good by luck (Sullivan, Timmermann & White
+  1999; White 2000; Hansen 2005; Bailey, Borwein, López de Prado & Zhu 2017). Hence our split by time.
+- Regulators found that most retail binary-option clients lose money (ESMA 2018; ASIC 2019 reports
+  about 80% of clients losing).
+
+**What our data says.** Eight families of rules that can fire often, each with a frequency knob,
+and three machine-learning models with a confidence threshold, on all 67 assets (5 OTC, 62 real
+markets): tuned on the oldest 60% of each asset's 1-minute candles for a minimum share of candles
+with an arrow, chosen on the next 20%, judged once on the newest 20%.
+
+| Assets | Best win rate (no minimum) | At least 1 candle in 4 | 1 in 2 | Almost every candle |
+|---|---|---|---|---|
+| OTC (5) | 50.0% (about 41 an hour) | 49.9% (42/h) | 49.8% (43/h) | 50.1% (60/h) |
+| Real forex (18) | 52.8% (4/h) | 51.6% (18/h) | 51.1% (40/h) | 50.9% (60/h) |
+| Real crypto (3) | 54.5% (14/h) | 51.6% (29/h) | 52.6% (35/h) | 52.0% (60/h) |
+| Other real markets (41) | 50.7% (24/h) | 50.8% (37/h) | 50.7% (39/h) | 50.7% (60/h) |
+
+(The breakout learned with the wider choices below; win rates from the candle's open, all assets of a
+group together. Break-even is 53.8% at an 86% payout.)
+
+- **On the OTC assets more arrows cost nothing**: every rule wins about 50% however often it fires,
+  so the extension can give an arrow on almost every candle at the same (coin-flip) win rate.
+- **On real markets more arrows cost win rate**: forex falls from 52.8% to about 51% when arrows come
+  on half the candles. With the entry 5 s after the open (8 markets with 5-second candles) the arrows
+  of every frequency lose another 1.2 to 2.6 points: 56.1% to 53.5% for the best win rate, 51.8% to
+  50.6% at 1 candle in 2.
+- **No family beats the breakout at the same frequency.** Following or fading the last candle's
+  colour, streaks, distance from a moving average (z-score), RSI(2), the hour or minute of the day,
+  and logistic regression, gradient boosting and nearest-neighbour models on 18 candle features all
+  did the same or worse, everywhere.
+- Two effects show through. Fading a candle that closes at its own high or low (the bounce of the
+  first bullet) won 57.9% on real EUR/GBP and 57.4% on USD/CAD from the open, with about 6 to 9
+  arrows an hour. On real Bitcoin, following a candle that closes within 10% of its own high or low
+  won **55.7%** of 10,224 arrows, with an arrow on 59% of the candles (about 35 an hour), from the open.
+
+**What changed in the extension:** the learner tries 432 versions instead of 264. A lookback of 1
+candle and zones up to "the upper / lower half" (50%) are new: these are the frequent versions, and
+the 1-candle fade above. It chooses the logic of each asset once for each frequency of the new
+**Arrows** setting (best win rate, at least 1 candle in 10, 4, 2, or almost every candle). The panel
+shows each choice's arrows per hour and win rate for the selected asset before you pick one. The
+chart script draws the same arrows.
+
+References:
+Roll 1984, *A simple implicit measure of the effective bid-ask spread*, J. Finance ([pdf](https://www.bauer.uh.edu/rsusmel/phd/roll1984.pdf));
+Müller, Dacorogna et al. 1990, *Statistical study of foreign exchange rates*, J. Banking & Finance ([link](https://www.sciencedirect.com/science/article/pii/037842669090009Q));
+Gao, Han, Li & Zhou 2018, *Market intraday momentum*, J. Financial Economics ([SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2440866));
+Wen, Bouri, Xu & Zhao 2022, *Intraday return predictability in the cryptocurrency markets*, N. Am. J. Econ. Finance ([SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4080253));
+Andersen & Bollerslev 1997, *Intraday periodicity and volatility persistence*, J. Empirical Finance ([pdf](https://public.econ.duke.edu/~boller/Published_Papers/joef_97.pdf));
+Marshall, Young & Rose 2006, *Candlestick technical trading strategies*, J. Banking & Finance ([link](https://www.sciencedirect.com/science/article/pii/S0378426605002116));
+Lo, Mamaysky & Wang 2000, *Foundations of technical analysis*, J. Finance ([NBER](https://www.nber.org/system/files/working_papers/w7613/w7613.pdf));
+Geifman & El-Yaniv 2017, *Selective classification for deep neural networks* ([arXiv](https://arxiv.org/abs/1705.08500));
+López de Prado 2018, *Advances in Financial Machine Learning* (Wiley); Joubert 2022, *Meta-labeling: theory and framework*, J. Financial Data Science ([doi](https://doi.org/10.3905/jfds.2022.1.098));
+Sullivan, Timmermann & White 1999, *Data-snooping, technical trading rule performance, and the bootstrap*, J. Finance ([link](https://ideas.repec.org/a/bla/jfinan/v54y1999i5p1647-1691.html));
+White 2000, *A reality check for data snooping*, Econometrica; Hansen 2005, *A test for superior predictive ability*, JBES;
+Bailey, Borwein, López de Prado & Zhu 2017, *The probability of backtest overfitting*, J. Computational Finance ([pdf](https://escholarship.org/content/qt4w1110bb/qt4w1110bb.pdf));
+ESMA 2018, *Product intervention analysis: binary options* ([pdf](https://www.esma.europa.eu/sites/default/files/library/esma50-162-214_product_intervention_analysis_binary_options.pdf));
+ASIC 2019, *Report 626: Consumer harm from OTC binary options and CFDs* ([pdf](https://download.asic.gov.au/media/5241548/rep626-published-22-august-2019.pdf)).
 
 ## What changed because of this research
 
@@ -138,6 +214,7 @@ node research\fetch_real.js 60                            # round 3: the 59 real
 node research\fetch_history.js 1916 BTCUSD 92             # older Bitcoin candles (also 1918 ETHUSD, 1921 XRPUSD)
 node research\fetch_history.js 1878 real/USDCAD 8 5       # 5-second candles (also GBPCAD, CHFJPY, EURUSD, AUDUSD, EURGBP, NZDCAD, AU200)
 .venv\Scripts\python.exe research\real_markets.py         # round 3   -> results-real.md
+.venv\Scripts\python.exe research\frequency.py            # round 5   -> results-frequency.md (about 30 minutes)
 ```
 
 Asset ids used: EUR/USD (OTC) 76, GBP/USD (OTC) 81, CARDANO (OTC) 1974, ETH (OTC) 1941,

@@ -220,8 +220,8 @@
     return {
       // 'breakout' (chart script option 1) or 'vote' (option 2).
       method: s.method === 'vote' || s.method === 2 ? 'vote' : 'breakout',
-      brkCandles: int(s.brkCandles, 2, 60, 5), // lookback, this candle included
-      brkZone: int(s.brkZone, 0, 45, 0), // close within this % of the range from the high / low
+      brkCandles: int(s.brkCandles, 1, 60, 5), // lookback, this candle included
+      brkZone: int(s.brkZone, 0, 50, 0), // close within this % of the range from the high / low (50: the upper / lower half)
       brkBody: int(s.brkBody, 0, 90, 0), // body at least this % of the candle
       reverse: !!s.reverse, // trade the opposite of the arrow (both methods)
       minScore: Number(s.minScore),

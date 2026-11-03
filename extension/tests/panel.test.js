@@ -2,7 +2,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { whyText, tradedEdge, tone, sessionSides } = require('../src/panel.js');
+const { whyText, tradedEdge, tone, sessionSides, frequencyOptions, perHour, rulesText } = require('../src/panel.js');
 
 const target = (extra) => Object.assign({ activeId: 2159, kind: 'blitz', name: '1000Sats (OTC)', enabled: true, suspended: false, reason: '' }, extra);
 const state = (extra) => Object.assign({
@@ -73,4 +73,21 @@ test('win rate colours, the bought direction\'s results, and the session per dir
   assert.equal(sessionSides({ sides: { call: { wins: 2, losses: 0, ties: 0 }, put: { wins: 0, losses: 0, ties: 0 } } }), 'CALL 2W / 0L (100%)');
   assert.equal(sessionSides({ sides: null }), '');
   assert.equal(sessionSides({}), '');
+});
+
+test('the "Arrows" choices show this asset\'s arrows an hour and win rate for each frequency', () => {
+  const lv = (coverage, rate, late) => ({ check: { coverage, rate, n: 400 }, late: late ? { rate: late, n: 200 } : undefined });
+  const learnedHere = { levels: { 0: lv(0.08, 0.545, 0.53), 0.1: lv(0.12, 0.54), 0.25: lv(0.3, 0.52), 0.5: null, 0.9: lv(0.97, 0.51) } };
+  const st = { learnedHere, target: { candleSize: 60 }, frequencies: [0, 0.1, 0.25, 0.5, 0.9] };
+  assert.deepEqual(frequencyOptions(st).map((o) => o.value + ' ' + o.text), [
+    '0 Best win rate (fewest) - 4.8/h, 53.0%',
+    '0.1 1 candle in 10 or more - 7.2/h, 54.0%',
+    '0.25 1 candle in 4 or more - 18/h, 52.0%',
+    '0.5 1 candle in 2 or more - not possible here',
+    '0.9 Almost every candle - 58/h, 51.0%',
+  ]);
+  assert.deepEqual(frequencyOptions({ learnedHere: null, target: null }).map((o) => o.text)[2], '1 candle in 4 or more', 'nothing learned: the names only');
+  assert.equal(perHour(0.25, 300), '3/h');
+  assert.equal(perHour(0.5, 30), '60/h');
+  assert.equal(rulesText({ method: 'breakout', brkCandles: 1, brkZone: 50, brkBody: 0, reverse: true }), 'Breakout 1 candle, close in the upper / lower half, reversed');
 });

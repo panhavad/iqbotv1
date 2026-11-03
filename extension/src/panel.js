@@ -51,6 +51,7 @@ label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 input[type=number], select { width: 56px; background: #111214; color: #fff; border: 1px solid #44464d;
   border-radius: 4px; padding: 2px 4px; font: inherit; }
 select { width: 130px; }
+select.wide { width: auto; flex: 1; min-width: 0; }
 input[type=checkbox], input[type=radio] { margin: 0; }
 .real-box { border: 1px solid #db4931; border-radius: 6px; padding: 4px 6px; margin: 4px 0; color: #ff8a73; }
 .section { margin-top: 10px; padding-top: 8px; border-top: 1px solid #333439; }
@@ -92,6 +93,9 @@ button.link { background: none; border: 0; color: #56ceff; cursor: pointer; padd
       <label class="call" title="Buy only the CALL (higher) arrows"><input type="radio" name="dir" value="call">&#9650; CALL only</label>
       <label class="put" title="Buy only the PUT (lower) arrows"><input type="radio" name="dir" value="put">&#9660; PUT only</label>
     </div>
+    <div class="row" title="How often arrows come: the learned logic of each asset for that frequency. More arrows cost win rate (shown for this asset).">
+      <span>Arrows</span><select class="wide" data-s="frequency"></select>
+    </div>
     <div class="row">
       <label><input type="radio" name="acct" value="practice"> Practice <span class="muted" data-f="practice"></span></label>
       <label><input type="radio" name="acct" value="real"> Real <span class="muted" data-f="real"></span></label>
@@ -128,8 +132,8 @@ button.link { background: none; border: 0; color: #56ceff; cursor: pointer; padd
         <span>Target win rate (%)</span><input type="number" min="51" max="99" step="1" data-s="target">
         <div class="sub">Manual rules (where nothing is learned)</div>
         <span>Signal method</span><select data-r="method"><option value="breakout">Breakout momentum</option><option value="vote">15-strategy vote</option></select>
-        <span>Breakout: candles</span><input type="number" min="2" max="60" step="1" data-r="brkCandles">
-        <span>Breakout: close within (%)</span><input type="number" min="0" max="45" step="1" data-r="brkZone">
+        <span>Breakout: candles</span><input type="number" min="1" max="60" step="1" data-r="brkCandles">
+        <span>Breakout: close within (%)</span><input type="number" min="0" max="50" step="1" data-r="brkZone">
         <span>Breakout: minimum body (%)</span><input type="number" min="0" max="90" step="1" data-r="brkBody">
         <span>Reverse the arrows</span><input type="checkbox" data-r="reverse">
         <span>Vote: minimum score</span><input type="number" min="0.05" max="1" step="0.05" data-r="minScore">
@@ -180,8 +184,35 @@ button.link { background: none; border: 0; color: #56ceff; cursor: pointer; padd
 
   function rulesText(r) {
     if (!r || r.method === 'vote') return '15-strategy vote' + (r && r.reverse ? ', reversed' : '');
-    return 'Breakout ' + r.brkCandles + ' candles' + (r.brkZone ? ', close within ' + r.brkZone + '%' : ', close at the high / low') +
+    return 'Breakout ' + r.brkCandles + (r.brkCandles === 1 ? ' candle' : ' candles') +
+      (r.brkZone >= 50 ? ', close in the upper / lower half' : r.brkZone ? ', close within ' + r.brkZone + '%' : ', close at the high / low') +
       (r.brkBody ? ', body ' + r.brkBody + '%+' : '') + (r.reverse ? ', reversed' : '');
+  }
+
+  // Arrows an hour for a share of candles with an arrow, e.g. "15/h".
+  function perHour(coverage, size) {
+    if (!Number.isFinite(coverage) || !size) return '';
+    const x = coverage * 3600 / size;
+    return (x >= 10 ? Math.round(x) : Math.round(x * 10) / 10) + '/h';
+  }
+
+  // The options of the "Arrows" setting, with this asset's frequency and win rate for each
+  // (judged like the win rate card: the price 5 s after the open where that was measured).
+  function frequencyOptions(st) {
+    const l = st.learnedHere;
+    const size = st.target && st.target.candleSize;
+    return (st.frequencies || [0, 0.1, 0.25, 0.5, 0.9]).map((f) => {
+      const name = !f ? 'Best win rate (fewest)' : f >= 0.9 ? 'Almost every candle' : '1 candle in ' + Math.round(1 / f) + ' or more';
+      const lv = l && l.levels ? l.levels[String(f)] : null;
+      let detail = '';
+      if (lv && lv.check) {
+        const j = lv.late && lv.late.n >= 30 ? lv.late : lv.check;
+        detail = ' - ' + perHour(lv.check.coverage, size) + ', ' + (j.n ? pct(j.rate) : '-');
+      } else if (l && l.levels) {
+        detail = ' - not possible here';
+      }
+      return { value: String(f), text: name + detail };
+    });
   }
 
   // This session's results of the CALL and the PUT trades, e.g. "CALL 3W / 1L (75%) - PUT 1W / 2L (33%)"
@@ -343,7 +374,8 @@ button.link { background: none; border: 0; color: #56ceff; cursor: pointer; padd
       } else {
         rate.textContent = e.n ? pct(e.rate) : 'no arrows';
         rate.className = 'big ' + tone(e, be, e.unconfirmed);
-        f('rateNote').textContent = e.n.toLocaleString() + ' arrows' + (Number.isFinite(be) ? ', need ' + pct(be) : '');
+        const often = Number.isFinite(e.coverage) && t ? ' (' + perHour(e.coverage, t.candleSize) + ')' : '';
+        f('rateNote').textContent = e.n.toLocaleString() + ' arrows' + often + (Number.isFinite(be) ? ', need ' + pct(be) : '');
         f('sides').hidden = false;
         for (const key of ['call', 'put']) {
           const x = e[key];
@@ -402,6 +434,22 @@ button.link { background: none; border: 0; color: #56ceff; cursor: pointer; padd
 
       renderLogic(st);
 
+      // "Arrows": rebuilt only when its texts change, so an open list is not reset.
+      const freq = shadow.querySelector('[data-s="frequency"]');
+      const opts = frequencyOptions(st);
+      const sig2 = JSON.stringify(opts);
+      if (freq.dataset.sig !== sig2) {
+        freq.dataset.sig = sig2;
+        freq.textContent = '';
+        for (const o of opts) {
+          const el = document.createElement('option');
+          el.value = o.value;
+          el.textContent = o.text;
+          freq.appendChild(el);
+        }
+        freq.value = String(s.frequency);
+      }
+
       for (const el of shadow.querySelectorAll('[data-s]')) setInput(el, s[el.getAttribute('data-s')]);
       for (const el of shadow.querySelectorAll('[data-r]')) setInput(el, s.rules[el.getAttribute('data-r')]);
       // A standby tab must not change settings that the trading tab does not see.
@@ -440,9 +488,11 @@ button.link { background: none; border: 0; color: #56ceff; cursor: pointer; padd
         // Like with like: both from the candle open; the price 5 s in, where measured, separately.
         const late = l.late && l.late.n >= 30 ? l.late : null;
         const before = l.current && l.current.check;
-        f('compare').textContent = 'Default logic here ' + (before && before.n ? pct(before.rate) : '-') + ' -> learned ' +
-          (l.check.n ? pct(l.check.rate) : '-') + ' on the newest ' + l.parts.check.toLocaleString() + ' of ' + l.candles.toLocaleString() +
-          ' candles' + (late ? '; ' + pct(late.rate) + ' with the price 5 s after the open' : '') +
+        const size = t && t.candleSize;
+        const often = (x) => (x && Number.isFinite(x.coverage) ? ' (' + perHour(x.coverage, size) + ')' : '');
+        f('compare').textContent = 'Default logic here ' + (before && before.n ? pct(before.rate) : '-') + often(before) + ' -> learned ' +
+          (l.check.n ? pct(l.check.rate) : '-') + often(l.check) + ' on the newest ' + l.parts.check.toLocaleString() + ' of ' +
+          l.candles.toLocaleString() + ' candles' + (late ? '; ' + pct(late.rate) + ' with the price 5 s after the open' : '') +
           '. Target ' + Math.round(100 * l.target) + '%: ' + (l.reached ? 'reached.' : 'not reached.');
       } else {
         f('compare').textContent = st.settings.useLearned ? 'Not learned yet: press Learn now.' : 'Learning is switched off in Settings.';
@@ -476,6 +526,6 @@ button.link { background: none; border: 0; color: #56ceff; cursor: pointer; padd
     };
   }
 
-  root.NMPanel = { createPanel, whyText, tradedEdge, tone, sessionSides };
+  root.NMPanel = { createPanel, whyText, tradedEdge, tone, sessionSides, frequencyOptions, perHour, rulesText };
   if (typeof module === 'object' && module.exports) module.exports = root.NMPanel;
 })(typeof self !== 'undefined' ? self : this);

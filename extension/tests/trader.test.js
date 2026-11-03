@@ -736,6 +736,55 @@ test('the session counts the results of CALL and PUT trades apart', async () => 
   assert.ok(empty.session.sides, 'nothing to miss: counted at once');
 });
 
+test('"Arrows" picks each asset\'s learned logic for that frequency, at once, for the trader and the chart table', async () => {
+  const { FREQUENCIES, frequencyLabel } = require('../src/trader.js');
+  assert.deepEqual(FREQUENCIES, require('../src/learner.js').FREQUENCIES, 'the trader and the learner use the same frequencies');
+  const { trader } = await setup();
+  assert.equal(trader.settings.frequency, 0.25, 'default: at least 1 candle in 4');
+  const rules = (brkCandles, brkZone) => ({ method: 'breakout', brkCandles, brkZone, brkBody: 0, reverse: true });
+  const part = (rate, n, coverage) => ({ wins: Math.round(rate * n), n, rate, lo: rate - 0.03, hi: rate + 0.03, coverage,
+    call: { wins: 1, n: 2, rate: 0.5, lo: 0.1, hi: 0.9 }, put: { wins: 1, n: 2, rate: 0.5, lo: 0.1, hi: 0.9 } });
+  const level = (r, rate, coverage) => ({ rules: r, learn: part(rate, 900, coverage), choose: part(rate, 300, coverage), check: part(rate, 300, coverage) });
+  const result = {
+    name: 'EUR/USD (OTC)', activeId: 76, size: 60, candles: 20000, parts: { learn: 12000, choose: 4000, check: 4000 }, target: 0.9,
+    levels: { 0: level(rules(2, 0), 0.545, 0.08), 0.1: level(rules(2, 10), 0.54, 0.12), 0.25: level(rules(3, 30), 0.52, 0.3), 0.5: null, 0.9: level(rules(1, 50), 0.51, 0.97) },
+  };
+  Object.assign(result, result.levels[0]);
+  trader.setLearned('76/60', result);
+  assert.deepEqual([trader.rules().brkCandles, trader.rules().brkZone], [3, 30]);
+  assert.equal(trader.edge.coverage, 0.3);
+  assert.equal(trader.learnedTable()['76/60'].rules.brkZone, 30);
+  trader.engine = {}; // any engine: it must be rebuilt with the new logic
+  trader.setSettings({ frequency: 0.5 }); // no logic gives that many arrows here: the next lower one
+  assert.deepEqual([trader.rules().brkCandles, trader.rules().brkZone], [3, 30]);
+  trader.setSettings({ frequency: 0.9 });
+  assert.deepEqual([trader.rules().brkCandles, trader.rules().brkZone], [1, 50]);
+  assert.equal(trader.engine, null, 'rebuilt with the new logic');
+  assert.equal(trader.getState().learnedHere.check.rate, 0.51);
+  assert.equal(trader.learnedTable()['76/60'].rules.brkCandles, 1);
+  trader.setSettings({ frequency: 0 });
+  assert.equal(trader.rules().brkZone, 0);
+  trader.setSettings({ frequency: '0.24' });
+  assert.equal(trader.settings.frequency, 0.25, 'the nearest frequency');
+  assert.match(trader.getState().log.join('\n'), /Arrows: at least 1 candle in 4/);
+  assert.equal(frequencyLabel(0.9), 'almost every candle');
+  // A result learned before frequencies existed: its one logic, whatever the setting.
+  const oldResult = Object.assign({}, result.levels[0.1], { name: 'old', candles: 20000, parts: result.parts });
+  trader.setLearned('76/60', oldResult);
+  assert.equal(trader.rules().brkZone, 10);
+});
+
+test('the recent results of the panel rules also say how often their arrows come', async () => {
+  const later = SIGNALS.find((s) => s.t > 600);
+  const client = new FakeIqClient(CANDLES, { time: later.from + 2 });
+  const trader = new AutoTrader({ client, settings: { enabled: false }, setTimer: immediateTimer });
+  await trader.start();
+  const engine = createEngine();
+  let fired = 0;
+  for (const c of CANDLES.slice(0, later.t - 1)) if (engine.update({ open: c.open, high: c.max, low: c.min, close: c.close }).decision !== 0) fired += 1;
+  assert.ok(Math.abs(trader.edge.coverage - fired / (later.t - 1)) < 1e-9, trader.edge.coverage + ' vs ' + fired / (later.t - 1));
+});
+
 test('the method can be switched to the 15-strategy vote', async () => {
   const { trader } = await setup();
   trader.setSettings({ rules: { method: 'vote' } });

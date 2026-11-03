@@ -30,7 +30,10 @@ settings for each asset and shows how they really perform.
 - **Follows the traderoom as you click:** asset, option type and candle size, with names and
   balances as the traderoom shows them.
 - **Buy both, CALL only or PUT only**, with the win rate of the CALL and the PUT arrows shown apart.
-- **Learns the best logic for each asset:** 264 versions of the signal on up to 60,000 candles,
+- **Choose how often arrows come**, from the best win rate to an arrow on almost every candle. For
+  the selected asset, each choice shows its arrows an hour and its win rate on candles the logic
+  never learned from ([research, round 5](research/README.md#round-5-more-frequent-arrows)).
+- **Learns the best logic for each asset:** 432 versions of the signal on up to 60,000 candles,
   judged on newer candles it never learned from and re-checked with a realistic entry. It learns
   every open asset in turn, then writes the results into your chart script.
 - **Safe by default:** practice account first, a tick for real money, stop rules (trades, losses in a
@@ -133,8 +136,8 @@ the [QCS documentation](https://quadcode-tech.github.io/quadcodescript-docs/Scri
 | Group | Setting | Default | Meaning |
 |---|---|---|---|
 | Signal rules | Signal method | Breakout momentum | **Breakout momentum:** an arrow when a candle closes at the high (CALL) or low (PUT) of the last 5 candles. **15-strategy vote:** the earlier logic (see below). |
-| | Breakout: candles | 5 | How many candles (this one included) the high and low are taken from. |
-| | Breakout: close within (% of range) | 0 | 0: the close must be the high / low. 20: within the top / bottom 20% of the range. More means more arrows. |
+| | Breakout: candles | 5 | How many candles (this one included) the high and low are taken from (1 to 60; 1: the candle's own high and low). |
+| | Breakout: close within (% of range) | 0 | 0: the close must be the high / low. 20: within the top / bottom 20% of the range. More means more arrows; 50: in the upper / lower half, an arrow on almost every candle. |
 | | Breakout: minimum body (% of candle) | 0 | Arrow only when the candle's body is at least this share of its high-low range. |
 | | Reverse the arrows (fade) | off | CALL becomes PUT and PUT becomes CALL (both methods). |
 | | Vote: minimum agreement score | 0.30 | How strongly the weighted votes must agree (0 to 1). Higher means fewer arrows. |

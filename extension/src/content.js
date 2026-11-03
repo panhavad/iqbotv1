@@ -74,6 +74,7 @@
 
     // ---- the chart scripts in the account follow the learned logic -----------------------------
     let chartBusy = false;
+    let chartAgain = false; // asked for at once while saving: save again afterwards
     let chartAt = 0;
     let chartCode = '';
     // The chart needs a page reload when what it loaded shows the selected asset differently.
@@ -82,13 +83,14 @@
       return !!(t && t.activeId && chartLoaded !== null && chartCode && self.NMChartScript.differsFor(chartLoaded, chartCode, t.activeId));
     };
     async function syncChart(now) {
+      if (now && chartBusy) chartAgain = true;
       if (closed || chartBusy || trader.status !== 'ready') return;
       if (!now && Date.now() - chartAt < 10 * 60 * 1000) return; // background learning: at most every 10 minutes
       chartBusy = true;
       chartAt = Date.now();
       trader.setChart({ state: 'saving', error: '' });
       try {
-        const r = await self.NMChartScript.updateChartScripts(client, self.NMLuaScripts, trader.learned, trader.learnedKey(trader.target));
+        const r = await self.NMChartScript.updateChartScripts(client, self.NMLuaScripts, trader.learnedTable(), trader.learnedKey(trader.target));
         const main = r.scripts.find((s) => s.kind === 'signal') || r.scripts[0];
         if (main) {
           if (chartLoaded === null) chartLoaded = main.before;
@@ -101,6 +103,7 @@
         trader.setChart({ state: 'error', error: e.message });
       } finally {
         chartBusy = false;
+        if (chartAgain) { chartAgain = false; syncChart(true); }
       }
     }
 
@@ -131,7 +134,12 @@
       if (pending) return;
       pending = requestAnimationFrame(() => { pending = null; if (!closed) panel.render(trader.getState()); });
     });
-    trader.on('settings', (s) => chrome.storage.local.set(s.enabled ? { settings: s, heartbeat: Date.now() } : { settings: s }));
+    // Another "Arrows" frequency: every asset's learned logic changes, so does the chart script's table.
+    let frequency = trader.settings.frequency;
+    trader.on('settings', (s) => {
+      chrome.storage.local.set(s.enabled ? { settings: s, heartbeat: Date.now() } : { settings: s });
+      if (s.frequency !== frequency) { frequency = s.frequency; syncChart(true); }
+    });
     trader.on('session', (s) => chrome.storage.local.set({ session: s }));
     // Learned logic is kept per asset (saved at most every 5 seconds); the chart script follows it.
     let saveLearned = null;
